@@ -450,7 +450,24 @@ class MiedaDevice(threading.Thread):
                         manufacturer_code=self._manufacturer_code,
                         query=actual_query
                     ):
+                        # 在解析云端消息前，记录原始db_location值
+                        original_db_location = self._attributes.get("db_location")
+                        
                         self._parse_cloud_message(status)
+                        
+                        # 如果云端返回导致db_location发生变化，则根据db_running_status更新db_control_status
+                        new_db_location = self._attributes.get("db_location")
+                        if original_db_location != new_db_location:
+                            running_status = self._attributes.get("db_running_status")
+                            if running_status is not None:
+                                # 根据运行状态确定控制状态
+                                control_status = self._determine_control_status_based_on_running(running_status)
+                                self._attributes["db_control_status"] = control_status
+                                
+                                # 如果有更新回调，也通知更新
+                                if hasattr(self, '_updates') and len(self._updates) > 0:
+                                    update_status = {"db_control_status": control_status}
+                                    self._update_all(update_status)
                     else:
                         if self._lua_runtime is not None:
                             if query_cmd := self._lua_runtime.build_query(actual_query):
@@ -461,7 +478,24 @@ class MiedaDevice(threading.Thread):
                         appliance_code=self._device_id,
                         query=actual_query
                     ):
+                        # 在解析云端消息前，记录原始db_location值
+                        original_db_location = self._attributes.get("db_location")
+                        
                         self._parse_cloud_message(status)
+                        
+                        # 如果云端返回导致db_location发生变化，则根据db_running_status更新db_control_status
+                        new_db_location = self._attributes.get("db_location")
+                        if original_db_location != new_db_location:
+                            running_status = self._attributes.get("db_running_status")
+                            if running_status is not None:
+                                # 根据运行状态确定控制状态
+                                control_status = self._determine_control_status_based_on_running(running_status)
+                                self._attributes["db_control_status"] = control_status
+                                
+                                # 如果有更新回调，也通知更新
+                                if hasattr(self, '_updates') and len(self._updates) > 0:
+                                    update_status = {"db_control_status": control_status}
+                                    self._update_all(update_status)
                     else:
                         if self._lua_runtime is not None:
                             if query_cmd := self._lua_runtime.build_query(actual_query):
