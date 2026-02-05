@@ -85,10 +85,10 @@ class MiedaDevice(threading.Thread):
         self._cloud = cloud
 
     def _determine_control_status_based_on_running(self, running_status):
-        # ????????????? ????????"start"???????start"
+        # ???????"start"????"start"
         if running_status == "start":
             return "start"
-        # ????????standby?pause?off?error????????pause
+        # ???????standby?pause?off?error????"pause"
         else:
             return "pause"
 
@@ -144,7 +144,7 @@ class MiedaDevice(threading.Thread):
         self._calculate_set = values_set if values_set else []
 
     def set_default_values(self, default_values: dict):
-        """????????"""
+        """?????"""
         self._default_values = default_values or {}
 
     def get_attribute(self, attribute):
@@ -200,7 +200,7 @@ class MiedaDevice(threading.Thread):
                         running_status = self._attributes.get("db_running_status")
                         if running_status is not None:
                             control_status = self._determine_control_status_based_on_running(running_status)
-                            # ????db_control_status
+                            # ??db_control_status
                             self._attributes["db_control_status"] = control_status
                             new_status["db_control_status"] = control_status
 
@@ -228,7 +228,7 @@ class MiedaDevice(threading.Thread):
                         running_status = self._attributes.get("db_running_status")
                         if running_status is not None:
                             control_status = self._determine_control_status_based_on_running(running_status)
-                            # ????db_control_status
+                            # ??db_control_status
                             self._attributes["db_control_status"] = control_status
                             new_status["db_control_status"] = control_status
                     
@@ -246,31 +246,30 @@ class MiedaDevice(threading.Thread):
                         running_status = self._attributes.get("db_running_status")
                         if running_status is not None:
                             control_status = self._determine_control_status_based_on_running(running_status)
-                            # ????db_control_status
+                            # ??db_control_status
                             self._attributes["db_control_status"] = control_status
                             new_status["db_control_status"] = control_status
-                
-                # ?????????????????db_position??db_location
-                if attribute not in ["db_location_selection", "db_position", "db_location"]:
-                    db_position = self._attributes.get("db_position", 1)
-                    if db_position == 0:
-                        # ?db_position?0??db_location????????
-                        current_location = self._attributes.get("db_location", 1)
-                        calculated_location = 2 if current_location == 1 else 1
-                        new_status["db_location"] = calculated_location
-                    elif db_position == 1:
-                        # ?db_position?1??db_location????
-                        current_location = self._attributes.get("db_location", 1)
-                        new_status["db_location"] = current_location
-                
-                # ????db_control_status???????????????db_control_status????????
-                if attribute == "db_control_status":
-                    # ??????
-                    self._attributes["db_control_status"] = value
-                    # ??????
-                    new_status["db_control_status"] = value
-                    # ?????????????
-                    await self.refresh_status()
+            else:
+                # ????T0xD9????????db_position?db_location
+                db_position = self._attributes.get("db_position", 1)
+                if db_position == 0:
+                    # db_position = 0?db_location????????
+                    current_location = self._attributes.get("db_location", 1)
+                    calculated_location = 2 if current_location == 1 else 1
+                    new_status["db_location"] = calculated_location
+                elif db_position == 1:
+                    # db_position = 1?db_location??
+                    current_location = self._attributes.get("db_location", 1)
+                    new_status["db_location"] = current_location
+            
+            # ???db_control_status????
+            if attribute == "db_control_status":
+                # ????db_control_status
+                self._attributes["db_control_status"] = value
+                # ???db_control_status??????
+                new_status["db_control_status"] = value
+                # ????????????
+                await self.refresh_status()
             
             # Convert dot-notation attributes to nested structure for transmission
             nested_status = self._convert_to_nested_structure(new_status)
