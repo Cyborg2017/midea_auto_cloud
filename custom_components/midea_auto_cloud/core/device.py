@@ -224,6 +224,15 @@ class MiedaDevice(threading.Thread):
                         # 当db_position为1时，db_location保持不变
                         current_location = self._attributes.get("db_location", 1)
                         new_status["db_location"] = current_location
+
+                # 每次db_location变化时，db_control_status的状态需要根据db_running_status更新
+                if "db_location" in new_status:
+                    running_status = self._attributes.get("db_running_status")
+                    if running_status is not None:
+                        # 根据运行状态确定控制状态
+                        control_status = self._determine_control_status_based_on_running(running_status)
+                        new_status["db_control_status"] = control_status
+                        self._attributes["db_control_status"] = control_status
             
             # Convert dot-notation attributes to nested structure for transmission
             nested_status = self._convert_to_nested_structure(new_status)
@@ -310,6 +319,15 @@ class MiedaDevice(threading.Thread):
                     # 当db_position为1时，db_location保持不变
                     current_location = self._attributes.get("db_location", 1)
                     new_status["db_location"] = current_location
+
+            # 每次db_location变化时，db_control_status的状态需要根据db_running_status更新
+            if "db_location" in new_status:
+                running_status = self._attributes.get("db_running_status")
+                if running_status is not None:
+                    # 根据运行状态确定控制状态
+                    control_status = self._determine_control_status_based_on_running(running_status)
+                    new_status["db_control_status"] = control_status
+                    self._attributes["db_control_status"] = control_status
     
         # Convert dot-notation attributes to nested structure for transmission
         nested_status = self._convert_to_nested_structure(new_status)
