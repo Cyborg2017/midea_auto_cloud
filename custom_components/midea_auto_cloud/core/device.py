@@ -193,6 +193,19 @@ class MiedaDevice(threading.Thread):
                     
                     # 同时将db_location_selection也传递给云端
                     new_status["db_location_selection"] = value
+                    
+                    # 立即刷新状态以显示新筒的状态
+                    await self.refresh_status()
+
+                    # 获取当前运行状态
+                    running_status = self._attributes.get("db_running_status")
+                    if running_status is not None:
+                        # 根据运行状态确定控制状态
+                        control_status = self._determine_control_status_based_on_running(running_status)
+                        # 更新本地属性
+                        self._attributes["db_control_status"] = control_status
+                        # 添加到要发送的状态中（如果需要发送到云端）
+                        new_status["db_control_status"] = control_status
                 # 如果是更新db_position，根据其值调整db_location
                 elif attribute == "db_position":
                     if value == 1:
@@ -212,30 +225,18 @@ class MiedaDevice(threading.Thread):
                         elif new_location == 2:
                             self._attributes["db_location_selection"] = "right"
                             new_status["db_location_selection"] = "right"
-                # 处理db_power或其他非db_location相关属性
                 else:
-                    # 保留原始属性值到new_status
-                    new_status[attribute] = value
-                
-                # 针对T0xD9复式洗衣机，当切换筒选择时，立即刷新状态以显示新筒的状态        
-                if attribute == "db_location_selection":
-                    # 立即刷新状态以显示新筒的状态
-                    await self.refresh_status()
-
-                    # 获取当前运行状态
-                    running_status = self._attributes.get("db_running_status")
-                    if running_status is not None:
-                        # 根据运行状态确定控制状态
-                        control_status = self._determine_control_status_based_on_running(running_status)
-                        # 更新本地属性
-                        self._attributes["db_control_status"] = control_status
-                        # 添加到要发送的状态中（如果需要发送到云端）
-                        new_status["db_control_status"] = control_status
-            # 对于非T0xD9设备，保留原始逻辑
-            else:
-                # 如果设置了db_control_status，需要同步到本地属性
-                if attribute == "db_control_status":
-                    self._attributes["db_control_status"] = value
+                    # 非db_position和db_location_selection更新，根据db_position调整db_location
+                    db_position = self._attributes.get("db_position", 1)
+                    if db_position == 0:
+                        # 当db_position为0时，db_location切换为另一个选项
+                        current_location = self._attributes.get("db_location", 1)
+                        calculated_location = 2 if current_location == 1 else 1
+                        new_status["db_location"] = calculated_location
+                    elif db_position == 1:
+                        # 当db_position为1时，db_location保持不变
+                        current_location = self._attributes.get("db_location", 1)
+                        new_status["db_location"] = current_location
             
             # Convert dot-notation attributes to nested structure for transmission
             nested_status = self._convert_to_nested_structure(new_status)
@@ -288,6 +289,17 @@ class MiedaDevice(threading.Thread):
                 
                 # 同时将db_location_selection也传递给云端
                 new_status["db_location_selection"] = location_selection
+                
+                # 立即刷新状态以显示新筒的状态
+                await self.refresh_status()
+
+                # 获取当前运行状态
+                running_status = self._attributes.get("db_running_status")
+                if running_status is not None:
+                    # 根据运行状态确定控制状态
+                    control_status = self._determine_control_status_based_on_running(running_status)
+                    # 更新本地属性
+                    self._attributes["db_control_status"] = control_status
             # 如果attributes中有db_position，根据其值调整db_location
             elif "db_position" in attributes:
                 position_value = attributes["db_position"]
@@ -311,30 +323,17 @@ class MiedaDevice(threading.Thread):
                         self._attributes["db_location_selection"] = "right"
                         new_status["db_location_selection"] = "right"
             else:
-                # 处理db_power或其他非db_location相关属性，保留原始属性值到new_status
-                for attr, value in attributes.items():
-                    if attr not in ["db_position", "db_location_selection"]:
-                        new_status[attr] = value
-
-            # 针对T0xD9复式洗衣机，当切换筒选择时，立即刷新状态以显示新筒的状态        
-            if "db_location_selection" in attributes:
-                # 立即刷新状态以显示新筒的状态
-                await self.refresh_status()
-
-                # 获取当前运行状态
-                running_status = self._attributes.get("db_running_status")
-                if running_status is not None:
-                    # 根据运行状态确定控制状态
-                    control_status = self._determine_control_status_based_on_running(running_status)
-                    # 更新本地属性
-                    self._attributes["db_control_status"] = control_status
-        # 对于非T0xD9设备，保留原始逻辑
-        else:
-            # 如果设置了db_control_status，需要同步到本地属性和new_status
-            if "db_control_status" in attributes:
-                control_status_value = attributes["db_control_status"]
-                new_status["db_control_status"] = control_status_value
-                self._attributes["db_control_status"] = control_status_value
+                # 没有db_position或db_location_selection更新，根据当前db_position调整db_location
+                db_position = self._attributes.get("db_position", 1)
+                if db_position == 0:
+                    # 当db_position为0时，db_location切换为另一个选项
+                    current_location = self._attributes.get("db_location", 1)
+                    calculated_location = 2 if current_location == 1 else 1
+                    new_status["db_location"] = calculated_location
+                elif db_position == 1:
+                    # 当db_position为1时，db_location保持不变
+                    current_location = self._attributes.get("db_location", 1)
+                    new_status["db_location"] = current_location
     
         # Convert dot-notation attributes to nested structure for transmission
         nested_status = self._convert_to_nested_structure(new_status)
@@ -457,24 +456,7 @@ class MiedaDevice(threading.Thread):
                         manufacturer_code=self._manufacturer_code,
                         query=actual_query
                     ):
-                        # 在解析云端消息前，记录原始db_location值
-                        original_db_location = self._attributes.get("db_location")
-                        
                         self._parse_cloud_message(status)
-                        
-                        # 如果云端返回导致db_location发生变化，则根据db_running_status更新db_control_status
-                        new_db_location = self._attributes.get("db_location")
-                        if original_db_location != new_db_location:
-                            running_status = self._attributes.get("db_running_status")
-                            if running_status is not None:
-                                # 根据运行状态确定控制状态
-                                control_status = self._determine_control_status_based_on_running(running_status)
-                                self._attributes["db_control_status"] = control_status
-                                
-                                # 如果有更新回调，也通知更新
-                                if hasattr(self, '_updates') and len(self._updates) > 0:
-                                    update_status = {"db_control_status": control_status}
-                                    self._update_all(update_status)
                     else:
                         if self._lua_runtime is not None:
                             if query_cmd := self._lua_runtime.build_query(actual_query):
@@ -485,24 +467,7 @@ class MiedaDevice(threading.Thread):
                         appliance_code=self._device_id,
                         query=actual_query
                     ):
-                        # 在解析云端消息前，记录原始db_location值
-                        original_db_location = self._attributes.get("db_location")
-                        
                         self._parse_cloud_message(status)
-                        
-                        # 如果云端返回导致db_location发生变化，则根据db_running_status更新db_control_status
-                        new_db_location = self._attributes.get("db_location")
-                        if original_db_location != new_db_location:
-                            running_status = self._attributes.get("db_running_status")
-                            if running_status is not None:
-                                # 根据运行状态确定控制状态
-                                control_status = self._determine_control_status_based_on_running(running_status)
-                                self._attributes["db_control_status"] = control_status
-                                
-                                # 如果有更新回调，也通知更新
-                                if hasattr(self, '_updates') and len(self._updates) > 0:
-                                    update_status = {"db_control_status": control_status}
-                                    self._update_all(update_status)
                     else:
                         if self._lua_runtime is not None:
                             if query_cmd := self._lua_runtime.build_query(actual_query):
@@ -713,5 +678,3 @@ class MiedaDevice(threading.Thread):
     #                                   f"{e.__traceback__.tb_lineno}, {repr(e)}")
     #                 self.disconnect()
     #                 break
-
-
