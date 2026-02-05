@@ -217,8 +217,14 @@ class MiedaDevice(threading.Thread):
                     # 保留原始属性值到new_status
                     new_status[attribute] = value
                 
-                # 每次db_location变化时，db_control_status的状态需要根据db_running_status更新
+                # 每次db_location变化时，需要立刻刷新db_running_status，然后更新db_control_status
                 if "db_location" in new_status:
+                    # 先触发刷新以获取最新的运行状态
+                    await self.refresh_status()
+                    # 稍作延迟以确保状态刷新完成
+                    import asyncio
+                    await asyncio.sleep(0.5)
+                    # 获取刷新后的运行状态并更新控制状态
                     running_status = self._attributes.get("db_running_status")
                     if running_status is not None:
                         # 根据运行状态确定控制状态
@@ -310,8 +316,14 @@ class MiedaDevice(threading.Thread):
                     if attr not in ["db_position", "db_location_selection"]:
                         new_status[attr] = value
 
-            # 每次db_location变化时，db_control_status的状态需要根据db_running_status更新
+            # 每次db_location变化时，需要立刻刷新db_running_status，然后更新db_control_status
             if "db_location" in new_status:
+                # 先触发刷新以获取最新的运行状态
+                await self.refresh_status()
+                # 稍作延迟以确保状态刷新完成
+                import asyncio
+                await asyncio.sleep(0.5)
+                # 获取刷新后的运行状态并更新控制状态
                 running_status = self._attributes.get("db_running_status")
                 if running_status is not None:
                     # 根据运行状态确定控制状态
