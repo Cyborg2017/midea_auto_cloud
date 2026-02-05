@@ -85,10 +85,10 @@ class MiedaDevice(threading.Thread):
         self._cloud = cloud
 
     def _determine_control_status_based_on_running(self, running_status):
-        # 根据运行状态确定控制状态, 只有当运行状态是"start"时，控制状态才为"start"
+        # 根据运行状态确定控制状�? 只有当运行状态是"start"时，控制状态才�?start"
         if running_status == "start":
             return "start"
-        # 其他所有情况(包括standby、pause、off、error等)，控制状态应为pause
+        # 其他所有情�?包括standby、pause、off、error�?，控制状态应为pause
         else:
             return "pause"
 
@@ -144,7 +144,7 @@ class MiedaDevice(threading.Thread):
         self._calculate_set = values_set if values_set else []
 
     def set_default_values(self, default_values: dict):
-        """设置属性的默认值"""
+        """设置属性的默认�?""
         self._default_values = default_values or {}
 
     def get_attribute(self, attribute):
@@ -183,7 +183,7 @@ class MiedaDevice(threading.Thread):
             if self._device_type == 0xD9:
                 # 如果是更新db_location_selection，需要传递给云端并更新本地db_location
                 if attribute == "db_location_selection":
-                    # 将选择转换为对应的db_location值
+                    # 将选择转换为对应的db_location�?
                     if value == "left":
                         new_status["db_location"] = 1
                         self._attributes["db_location"] = 1
@@ -194,17 +194,17 @@ class MiedaDevice(threading.Thread):
                     # 同时将db_location_selection也传递给云端
                     new_status["db_location_selection"] = value
                     
-                    # 立即刷新状态以显示新筒的状态
+                    # 立即刷新状态以显示新筒的状�?
                     await self.refresh_status()
 
-                    # 获取当前运行状态
+                    # 获取当前运行状�?
                     running_status = self._attributes.get("db_running_status")
                     if running_status is not None:
-                        # 根据运行状态确定控制状态
+                        # 根据运行状态确定控制状�?
                         control_status = self._determine_control_status_based_on_running(running_status)
-                        # 更新本地属性
+                        # 更新本地属�?
                         self._attributes["db_control_status"] = control_status
-                        # 添加到要发送的状态中（如果需要发送到云端）
+                        # 添加到要发送的状态中（如果需要发送到云端�?
                         new_status["db_control_status"] = control_status
                 # 如果是更新db_position，根据其值调整db_location
                 elif attribute == "db_position":
@@ -229,12 +229,12 @@ class MiedaDevice(threading.Thread):
                     # 非db_position和db_location_selection更新，根据db_position调整db_location
                     db_position = self._attributes.get("db_position", 1)
                     if db_position == 0:
-                        # 当db_position为0时，db_location切换为另一个选项
+                        # 当db_position�?时，db_location切换为另一个选项
                         current_location = self._attributes.get("db_location", 1)
                         calculated_location = 2 if current_location == 1 else 1
                         new_status["db_location"] = calculated_location
                     elif db_position == 1:
-                        # 当db_position为1时，db_location保持不变
+                        # 当db_position�?时，db_location保持不变
                         current_location = self._attributes.get("db_location", 1)
                         new_status["db_location"] = current_location
             
@@ -279,7 +279,7 @@ class MiedaDevice(threading.Thread):
             # 如果attributes中有db_location_selection，需要传递给云端并更新本地db_location
             if "db_location_selection" in attributes:
                 location_selection = attributes["db_location_selection"]
-                # 将选择转换为对应的db_location值
+                # 将选择转换为对应的db_location�?
                 if location_selection == "left":
                     new_status["db_location"] = 1
                     self._attributes["db_location"] = 1
@@ -290,15 +290,15 @@ class MiedaDevice(threading.Thread):
                 # 同时将db_location_selection也传递给云端
                 new_status["db_location_selection"] = location_selection
                 
-                # 立即刷新状态以显示新筒的状态
+                # 立即刷新状态以显示新筒的状�?
                 await self.refresh_status()
 
-                # 获取当前运行状态
+                # 获取当前运行状�?
                 running_status = self._attributes.get("db_running_status")
                 if running_status is not None:
-                    # 根据运行状态确定控制状态
+                    # 根据运行状态确定控制状�?
                     control_status = self._determine_control_status_based_on_running(running_status)
-                    # 更新本地属性
+                    # 更新本地属�?
                     self._attributes["db_control_status"] = control_status
             # 如果attributes中有db_position，根据其值调整db_location
             elif "db_position" in attributes:
@@ -326,12 +326,12 @@ class MiedaDevice(threading.Thread):
                 # 没有db_position或db_location_selection更新，根据当前db_position调整db_location
                 db_position = self._attributes.get("db_position", 1)
                 if db_position == 0:
-                    # 当db_position为0时，db_location切换为另一个选项
+                    # 当db_position�?时，db_location切换为另一个选项
                     current_location = self._attributes.get("db_location", 1)
                     calculated_location = 2 if current_location == 1 else 1
                     new_status["db_location"] = calculated_location
                 elif db_position == 1:
-                    # 当db_position为1时，db_location保持不变
+                    # 当db_position�?时，db_location保持不变
                     current_location = self._attributes.get("db_location", 1)
                     new_status["db_location"] = current_location
     
@@ -477,13 +477,13 @@ class MiedaDevice(threading.Thread):
     def _parse_cloud_message(self, status, update=True):
         # MideaLogger.debug(f"Received: {decrypted}")
         new_status = {}
-        # 对于有默认值的变量，在解析前先设置一次默认值
+        # 对于有默认值的变量，在解析前先设置一次默认�?
         for attr, default_value in self._default_values.items():
             # self._attributes[attr] = default_value
             if attr not in self._attributes or self._attributes[attr] is None:
                 new_status[attr] = default_value
 
-        # 处理云端返回的状态，云端结果会覆盖默认值
+        # 处理云端返回的状态，云端结果会覆盖默认�?
         for single in status.keys():
             value = status.get(single)
             if single not in self._attributes or self._attributes[single] != value:
