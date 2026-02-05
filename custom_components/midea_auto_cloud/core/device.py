@@ -85,10 +85,10 @@ class MiedaDevice(threading.Thread):
         self._cloud = cloud
 
     def _determine_control_status_based_on_running(self, running_status):
-        # 根据运行状态确定控制状�? 只有当运行状态是"start"时，控制状态才�?start"
+        # ????????????? ????????"start"???????start"
         if running_status == "start":
             return "start"
-        # 其他所有情�?包括standby、pause、off、error�?，控制状态应为pause
+        # ????????standby?pause?off?error????????pause
         else:
             return "pause"
 
@@ -144,7 +144,7 @@ class MiedaDevice(threading.Thread):
         self._calculate_set = values_set if values_set else []
 
     def set_default_values(self, default_values: dict):
-        """设置属性的默认�?""
+        """????????"""
         self._default_values = default_values or {}
 
     def get_attribute(self, attribute):
@@ -179,64 +179,98 @@ class MiedaDevice(threading.Thread):
                 new_status[attr] = self._attributes.get(attr)
             new_status[attribute] = value
             
-            # 针对T0xD9复式洗衣机，根据db_position调整db_location
+            # ??T0xD9??????????
             if self._device_type == 0xD9:
-                # 如果是更新db_location_selection，需要传递给云端并更新本地db_location
-                if attribute == "db_location_selection":
-                    # 将选择转换为对应的db_location�?
-                    if value == "left":
-                        new_status["db_location"] = 1
-                        self._attributes["db_location"] = 1
-                    elif value == "right":
-                        new_status["db_location"] = 2
-                        self._attributes["db_location"] = 2
-                    
-                    # 同时将db_location_selection也传递给云端
-                    new_status["db_location_selection"] = value
-                    
-                    # 立即刷新状态以显示新筒的状�?
-                    await self.refresh_status()
-
-                    # 获取当前运行状�?
-                    running_status = self._attributes.get("db_running_status")
-                    if running_status is not None:
-                        # 根据运行状态确定控制状�?
-                        control_status = self._determine_control_status_based_on_running(running_status)
-                        # 更新本地属�?
-                        self._attributes["db_control_status"] = control_status
-                        # 添加到要发送的状态中（如果需要发送到云端�?
-                        new_status["db_control_status"] = control_status
-                # 如果是更新db_position，根据其值调整db_location
-                elif attribute == "db_position":
-                    if value == 1:
-                        # db_position = 1，db_location不变
-                        pass
-                    elif value == 0:
-                        # db_position = 0，db_location切换为另一个选项
-                        current_location = self._attributes.get("db_location", 1)
-                        new_location = 2 if current_location == 1 else 1
-                        self._attributes["db_location"] = new_location
-                        new_status["db_location"] = new_location
+                # ?? db_location_selection?db_position ? db_location ????
+                if attribute in ["db_location_selection", "db_position", "db_location"]:
+                    # ?????db_location_selection?????????????db_location
+                    if attribute == "db_location_selection":
+                        # ?????????db_location?
+                        if value == "left":
+                            new_status["db_location"] = 1
+                            self._attributes["db_location"] = 1
+                        elif value == "right":
+                            new_status["db_location"] = 2
+                            self._attributes["db_location"] = 2
                         
-                        # 同步更新db_location_selection
-                        if new_location == 1:
+                        # ???db_location_selection??????
+                        new_status["db_location_selection"] = value
+                        
+                        # ???db_location_selection??????????db_running_status??db_control_status
+                        running_status = self._attributes.get("db_running_status")
+                        if running_status is not None:
+                            control_status = self._determine_control_status_based_on_running(running_status)
+                            # ????db_control_status
+                            self._attributes["db_control_status"] = control_status
+                            new_status["db_control_status"] = control_status
+
+                    # ?????db_position???????db_location
+                    elif attribute == "db_position":
+                        if value == 1:
+                            # db_position = 1?db_location??
+                            pass
+                        elif value == 0:
+                            # db_position = 0?db_location????????
+                            current_location = self._attributes.get("db_location", 1)
+                            new_location = 2 if current_location == 1 else 1
+                            self._attributes["db_location"] = new_location
+                            new_status["db_location"] = new_location
+                            
+                            # ????db_location_selection
+                            if new_location == 1:
+                                self._attributes["db_location_selection"] = "left"
+                                new_status["db_location_selection"] = "left"
+                            elif new_location == 2:
+                                self._attributes["db_location_selection"] = "right"
+                                new_status["db_location_selection"] = "right"
+                        
+                        # ?????db_location_selection?????db_running_status????db_control_status
+                        running_status = self._attributes.get("db_running_status")
+                        if running_status is not None:
+                            control_status = self._determine_control_status_based_on_running(running_status)
+                            # ????db_control_status
+                            self._attributes["db_control_status"] = control_status
+                            new_status["db_control_status"] = control_status
+                    
+                    # ??db_location????
+                    elif attribute == "db_location":
+                        # ????db_location_selection
+                        if value == 1:
                             self._attributes["db_location_selection"] = "left"
                             new_status["db_location_selection"] = "left"
-                        elif new_location == 2:
+                        elif value == 2:
                             self._attributes["db_location_selection"] = "right"
                             new_status["db_location_selection"] = "right"
-                else:
-                    # 非db_position和db_location_selection更新，根据db_position调整db_location
+                        
+                        # ?????db_location_selection?????db_running_status????db_control_status
+                        running_status = self._attributes.get("db_running_status")
+                        if running_status is not None:
+                            control_status = self._determine_control_status_based_on_running(running_status)
+                            # ????db_control_status
+                            self._attributes["db_control_status"] = control_status
+                            new_status["db_control_status"] = control_status
+                
+                # ?????????????????db_position??db_location
+                if attribute not in ["db_location_selection", "db_position", "db_location"]:
                     db_position = self._attributes.get("db_position", 1)
                     if db_position == 0:
-                        # 当db_position�?时，db_location切换为另一个选项
+                        # ?db_position?0??db_location????????
                         current_location = self._attributes.get("db_location", 1)
                         calculated_location = 2 if current_location == 1 else 1
                         new_status["db_location"] = calculated_location
                     elif db_position == 1:
-                        # 当db_position�?时，db_location保持不变
+                        # ?db_position?1??db_location????
                         current_location = self._attributes.get("db_location", 1)
                         new_status["db_location"] = current_location
+                
+                # ????db_control_status???????????????db_control_status????????
+                if attribute == "db_control_status":
+                    # ??????
+                    self._attributes["db_control_status"] = value
+                    # ??????
+                    new_status["db_control_status"] = value
+                    # ?????????????
+                    await self.refresh_status()
             
             # Convert dot-notation attributes to nested structure for transmission
             nested_status = self._convert_to_nested_structure(new_status)
@@ -274,67 +308,103 @@ class MiedaDevice(threading.Thread):
                 has_new = True
                 new_status[attribute] = value
     
-        # 针对T0xD9复式洗衣机的特殊处理
+        # ??T0xD9??????????
         if self._device_type == 0xD9:
-            # 如果attributes中有db_location_selection，需要传递给云端并更新本地db_location
-            if "db_location_selection" in attributes:
-                location_selection = attributes["db_location_selection"]
-                # 将选择转换为对应的db_location�?
-                if location_selection == "left":
-                    new_status["db_location"] = 1
-                    self._attributes["db_location"] = 1
-                elif location_selection == "right":
-                    new_status["db_location"] = 2
-                    self._attributes["db_location"] = 2
-                
-                # 同时将db_location_selection也传递给云端
-                new_status["db_location_selection"] = location_selection
-                
-                # 立即刷新状态以显示新筒的状�?
-                await self.refresh_status()
-
-                # 获取当前运行状�?
-                running_status = self._attributes.get("db_running_status")
-                if running_status is not None:
-                    # 根据运行状态确定控制状�?
-                    control_status = self._determine_control_status_based_on_running(running_status)
-                    # 更新本地属�?
-                    self._attributes["db_control_status"] = control_status
-            # 如果attributes中有db_position，根据其值调整db_location
-            elif "db_position" in attributes:
-                position_value = attributes["db_position"]
-                
-                if position_value == 1:
-                    # db_position = 1，db_location不变
-                    current_location = self._attributes.get("db_location", 1)
-                    new_status["db_location"] = current_location
-                elif position_value == 0:
-                    # db_position = 0，db_location切换为另一个选项
-                    current_location = self._attributes.get("db_location", 1)
-                    new_location = 2 if current_location == 1 else 1
-                    self._attributes["db_location"] = new_location
-                    new_status["db_location"] = new_location
+            # ?? db_location_selection?db_position ? db_location ????
+            if any(attr in attributes for attr in ["db_location_selection", "db_position", "db_location"]):
+                # ??attributes??db_location_selection?????????????db_location
+                if "db_location_selection" in attributes:
+                    location_selection = attributes["db_location_selection"]
+                    # ?????????db_location?
+                    if location_selection == "left":
+                        new_status["db_location"] = 1
+                        self._attributes["db_location"] = 1
+                    elif location_selection == "right":
+                        new_status["db_location"] = 2
+                        self._attributes["db_location"] = 2
                     
-                    # 同步更新db_location_selection
-                    if new_location == 1:
+                    # ???db_location_selection??????
+                    new_status["db_location_selection"] = location_selection
+                    
+                    # ???db_location_selection??????????db_running_status??db_control_status
+                    running_status = self._attributes.get("db_running_status")
+                    if running_status is not None:
+                        control_status = self._determine_control_status_based_on_running(running_status)
+                        # ????db_control_status
+                        self._attributes["db_control_status"] = control_status
+                        new_status["db_control_status"] = control_status
+                        
+                # ??attributes??db_position???????db_location
+                elif "db_position" in attributes:
+                    position_value = attributes["db_position"]
+                    
+                    if position_value == 1:
+                        # db_position = 1?db_location??
+                        current_location = self._attributes.get("db_location", 1)
+                        new_status["db_location"] = current_location
+                    elif position_value == 0:
+                        # db_position = 0?db_location????????
+                        current_location = self._attributes.get("db_location", 1)
+                        new_location = 2 if current_location == 1 else 1
+                        self._attributes["db_location"] = new_location
+                        new_status["db_location"] = new_location
+                        
+                        # ????db_location_selection
+                        if new_location == 1:
+                            self._attributes["db_location_selection"] = "left"
+                            new_status["db_location_selection"] = "left"
+                        elif new_location == 2:
+                            self._attributes["db_location_selection"] = "right"
+                            new_status["db_location_selection"] = "right"
+                    
+                    # ?????db_location_selection?????db_running_status????db_control_status
+                    running_status = self._attributes.get("db_running_status")
+                    if running_status is not None:
+                        control_status = self._determine_control_status_based_on_running(running_status)
+                        # ????db_control_status
+                        self._attributes["db_control_status"] = control_status
+                        new_status["db_control_status"] = control_status
+                
+                # ??attributes??db_location?????db_location_selection
+                elif "db_location" in attributes:
+                    location_value = attributes["db_location"]
+                    if location_value == 1:
                         self._attributes["db_location_selection"] = "left"
                         new_status["db_location_selection"] = "left"
-                    elif new_location == 2:
+                    elif location_value == 2:
                         self._attributes["db_location_selection"] = "right"
                         new_status["db_location_selection"] = "right"
+                    
+                    # ?????db_location_selection?????db_running_status????db_control_status
+                    running_status = self._attributes.get("db_running_status")
+                    if running_status is not None:
+                        control_status = self._determine_control_status_based_on_running(running_status)
+                        # ????db_control_status
+                        self._attributes["db_control_status"] = control_status
+                        new_status["db_control_status"] = control_status
             else:
-                # 没有db_position或db_location_selection更新，根据当前db_position调整db_location
+                # ??db_location_selection?db_position?db_location???????db_position??db_location
                 db_position = self._attributes.get("db_position", 1)
                 if db_position == 0:
-                    # 当db_position�?时，db_location切换为另一个选项
+                    # ?db_position?0??db_location????????
                     current_location = self._attributes.get("db_location", 1)
                     calculated_location = 2 if current_location == 1 else 1
                     new_status["db_location"] = calculated_location
                 elif db_position == 1:
-                    # 当db_position�?时，db_location保持不变
+                    # ?db_position?1??db_location????
                     current_location = self._attributes.get("db_location", 1)
                     new_status["db_location"] = current_location
-    
+            
+            # ??db_control_status?????????????????db_control_status????????
+            if "db_control_status" in attributes:
+                control_status_value = attributes["db_control_status"]
+                # ??????
+                self._attributes["db_control_status"] = control_status_value
+                # ??????
+                new_status["db_control_status"] = control_status_value
+                # ?????????????
+                await self.refresh_status()
+        
         # Convert dot-notation attributes to nested structure for transmission
         nested_status = self._convert_to_nested_structure(new_status)
         
@@ -424,22 +494,22 @@ class MiedaDevice(threading.Thread):
 
     async def refresh_status(self):
         for query in self._queries:
-            # 针对T0xD9复式洗衣机，根据db_position动态添加db_location参数
+            # ??T0xD9????????db_position????db_location??
             actual_query = query.copy() if isinstance(query, dict) else query
             if self._device_type == 0xD9 and isinstance(actual_query, dict):
-                # 根据db_position调整db_location
+                # ??db_position??db_location
                 db_position = self._attributes.get("db_position", 1)
                 if db_position == 1:
-                    # db_position = 1，db_location保持不变
+                    # db_position = 1?db_location????
                     current_location = self._attributes.get("db_location", 1)
                     actual_query["db_location"] = current_location
                 elif db_position == 0:
-                    # db_position = 0，db_location切换为另一个选项
+                    # db_position = 0?db_location????????
                     current_location = self._attributes.get("db_location", 1)
                     calculated_location = 2 if current_location == 1 else 1
                     actual_query["db_location"] = calculated_location
                     
-                    # 同步更新db_location_selection
+                    # ????db_location_selection
                     if calculated_location == 1:
                         self._attributes["db_location_selection"] = "left"
                     elif calculated_location == 2:
@@ -477,18 +547,55 @@ class MiedaDevice(threading.Thread):
     def _parse_cloud_message(self, status, update=True):
         # MideaLogger.debug(f"Received: {decrypted}")
         new_status = {}
-        # 对于有默认值的变量，在解析前先设置一次默认�?
+        # ??????????????????????
         for attr, default_value in self._default_values.items():
             # self._attributes[attr] = default_value
             if attr not in self._attributes or self._attributes[attr] is None:
                 new_status[attr] = default_value
 
-        # 处理云端返回的状态，云端结果会覆盖默认�?
+        # ????????????????????
         for single in status.keys():
             value = status.get(single)
             if single not in self._attributes or self._attributes[single] != value:
                 # self._attributes[single] = value
                 new_status[single] = value
+        
+        # ??T0xD9??????????db_running_status?db_control_status???
+        if self._device_type == 0xD9:
+            # ??????db_running_status?db_location_selection?????????????
+            has_running_status_update = "db_running_status" in new_status
+            has_location_selection_update = "db_location_selection" in new_status
+            
+            # ???????db_running_status????????db_control_status
+            if has_running_status_update:
+                running_status = new_status["db_running_status"]
+                # ????????????
+                control_status = self._determine_control_status_based_on_running(running_status)
+                # ??????
+                self._attributes["db_control_status"] = control_status
+                # ??????????
+                new_status["db_control_status"] = control_status
+            # ?????db_running_status?db_location_selection???????db_control_status??
+            elif has_location_selection_update and has_running_status_update:
+                # ?????????
+                current_running_status = new_status.get("db_running_status", self._attributes.get("db_running_status"))
+                if current_running_status:
+                    control_status = self._determine_control_status_based_on_running(current_running_status)
+                    self._attributes["db_control_status"] = control_status
+                    new_status["db_control_status"] = control_status
+            # ????db_location_selection?????????????????????
+            elif has_location_selection_update:
+                # ??????????????
+                current_running_status = self._attributes.get("db_running_status")
+                if current_running_status:
+                    control_status = self._determine_control_status_based_on_running(current_running_status)
+                    self._attributes["db_control_status"] = control_status
+                    new_status["db_control_status"] = control_status
+            # ???????db_control_status????????
+            elif "db_control_status" in new_status:
+                control_status = new_status["db_control_status"]
+                self._attributes["db_control_status"] = control_status
+
         if len(new_status) > 0:
             for c in self._calculate_get:
                 lvalue = c.get("lvalue")
@@ -501,11 +608,11 @@ class MiedaDevice(threading.Thread):
                             break
                     if calculate:
                         calculate_str1 = \
-                            (f"{lvalue.replace('[', 'self._attributes[').replace("]", "\"]")} = "
+                            (f"{lvalue.replace('[', 'self._attributes[').replace(']', "\"]")} = "
                              f"{rvalue.replace('[', 'self._attributes[').replace(']', "\"]")}") \
                                 .replace("[", "[\"")
                         calculate_str2 = \
-                            (f"{lvalue.replace('[', 'new_status[').replace("]", "\"]")} = "
+                            (f"{lvalue.replace('[', 'new_status[').replace(']', "\"]")} = "
                              f"{rvalue.replace('[', 'new_status[').replace(']', "\"]")}") \
                                 .replace("[", "[\"")
                         try:
