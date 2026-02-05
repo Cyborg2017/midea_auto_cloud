@@ -233,6 +233,11 @@ class MiedaDevice(threading.Thread):
                         control_status = self._determine_control_status_based_on_running(running_status)
                         new_status["db_control_status"] = control_status
                         self._attributes["db_control_status"] = control_status
+            # 对于非T0xD9设备或T0xD9设备的其他属性，也要确保db_control_status正确更新
+            else:
+                # 如果设置了db_control_status，需要同步到本地属性
+                if attribute == "db_control_status":
+                    self._attributes["db_control_status"] = value
             
             # Convert dot-notation attributes to nested structure for transmission
             nested_status = self._convert_to_nested_structure(new_status)
@@ -328,6 +333,13 @@ class MiedaDevice(threading.Thread):
                     control_status = self._determine_control_status_based_on_running(running_status)
                     new_status["db_control_status"] = control_status
                     self._attributes["db_control_status"] = control_status
+        # 对于非T0xD9设备或T0xD9设备的其他属性，也要确保db_control_status正确更新
+        else:
+            # 如果设置了db_control_status，需要同步到本地属性和new_status
+            if "db_control_status" in attributes:
+                control_status_value = attributes["db_control_status"]
+                new_status["db_control_status"] = control_status_value
+                self._attributes["db_control_status"] = control_status_value
     
         # Convert dot-notation attributes to nested structure for transmission
         nested_status = self._convert_to_nested_structure(new_status)
