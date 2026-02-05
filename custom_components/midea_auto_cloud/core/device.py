@@ -212,19 +212,11 @@ class MiedaDevice(threading.Thread):
                         elif new_location == 2:
                             self._attributes["db_location_selection"] = "right"
                             new_status["db_location_selection"] = "right"
+                # 处理db_power或其他非db_location相关属性
                 else:
-                    # 非db_position和db_location_selection更新，根据db_position调整db_location
-                    db_position = self._attributes.get("db_position", 1)
-                    if db_position == 0:
-                        # 当db_position为0时，db_location切换为另一个选项
-                        current_location = self._attributes.get("db_location", 1)
-                        calculated_location = 2 if current_location == 1 else 1
-                        new_status["db_location"] = calculated_location
-                    elif db_position == 1:
-                        # 当db_position为1时，db_location保持不变
-                        current_location = self._attributes.get("db_location", 1)
-                        new_status["db_location"] = current_location
-
+                    # 保留原始属性值到new_status
+                    new_status[attribute] = value
+                
                 # 每次db_location变化时，db_control_status的状态需要根据db_running_status更新
                 if "db_location" in new_status:
                     running_status = self._attributes.get("db_running_status")
@@ -233,7 +225,7 @@ class MiedaDevice(threading.Thread):
                         control_status = self._determine_control_status_based_on_running(running_status)
                         new_status["db_control_status"] = control_status
                         self._attributes["db_control_status"] = control_status
-            # 对于非T0xD9设备或T0xD9设备的其他属性，也要确保db_control_status正确更新
+            # 对于非T0xD9设备，保留原始逻辑
             else:
                 # 如果设置了db_control_status，需要同步到本地属性
                 if attribute == "db_control_status":
@@ -313,17 +305,10 @@ class MiedaDevice(threading.Thread):
                         self._attributes["db_location_selection"] = "right"
                         new_status["db_location_selection"] = "right"
             else:
-                # 没有db_position或db_location_selection更新，根据当前db_position调整db_location
-                db_position = self._attributes.get("db_position", 1)
-                if db_position == 0:
-                    # 当db_position为0时，db_location切换为另一个选项
-                    current_location = self._attributes.get("db_location", 1)
-                    calculated_location = 2 if current_location == 1 else 1
-                    new_status["db_location"] = calculated_location
-                elif db_position == 1:
-                    # 当db_position为1时，db_location保持不变
-                    current_location = self._attributes.get("db_location", 1)
-                    new_status["db_location"] = current_location
+                # 处理db_power或其他非db_location相关属性，保留原始属性值到new_status
+                for attr, value in attributes.items():
+                    if attr not in ["db_position", "db_location_selection"]:
+                        new_status[attr] = value
 
             # 每次db_location变化时，db_control_status的状态需要根据db_running_status更新
             if "db_location" in new_status:
@@ -333,7 +318,7 @@ class MiedaDevice(threading.Thread):
                     control_status = self._determine_control_status_based_on_running(running_status)
                     new_status["db_control_status"] = control_status
                     self._attributes["db_control_status"] = control_status
-        # 对于非T0xD9设备或T0xD9设备的其他属性，也要确保db_control_status正确更新
+        # 对于非T0xD9设备，保留原始逻辑
         else:
             # 如果设置了db_control_status，需要同步到本地属性和new_status
             if "db_control_status" in attributes:
