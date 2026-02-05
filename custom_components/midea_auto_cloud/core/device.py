@@ -218,13 +218,27 @@ class MiedaDevice(threading.Thread):
                     new_status[attribute] = value
                 
                 # 每次db_location变化时，db_control_status的状态需要根据db_running_status更新
+                # 由于切换有延时，db_running_status可能还未更新，所以需要异步处理
                 if "db_location" in new_status:
-                    running_status = self._attributes.get("db_running_status")
-                    if running_status is not None:
-                        # 根据运行状态确定控制状态
-                        control_status = self._determine_control_status_based_on_running(running_status)
-                        new_status["db_control_status"] = control_status
-                        self._attributes["db_control_status"] = control_status
+                    # 异步更新db_control_status，等待db_running_status更新后再处理
+                    import asyncio
+                    async def update_control_status_after_delay():
+                        # 等待一段时间让db_running_status更新
+                        await asyncio.sleep(1)
+                        running_status = self._attributes.get("db_running_status")
+                        if running_status is not None:
+                            # 根据运行状态确定控制状态
+                            control_status = self._determine_control_status_based_on_running(running_status)
+                            # 更新本地属性
+                            self._attributes["db_control_status"] = control_status
+                            
+                            # 通知更新
+                            if hasattr(self, '_updates') and len(self._updates) > 0:
+                                update_status = {"db_control_status": control_status}
+                                self._update_all(update_status)
+                    
+                    # 启动异步任务更新控制状态
+                    asyncio.create_task(update_control_status_after_delay())
             # 对于非T0xD9设备，保留原始逻辑
             else:
                 # 如果设置了db_control_status，需要同步到本地属性
@@ -312,12 +326,25 @@ class MiedaDevice(threading.Thread):
 
             # 每次db_location变化时，db_control_status的状态需要根据db_running_status更新
             if "db_location" in new_status:
-                running_status = self._attributes.get("db_running_status")
-                if running_status is not None:
-                    # 根据运行状态确定控制状态
-                    control_status = self._determine_control_status_based_on_running(running_status)
-                    new_status["db_control_status"] = control_status
-                    self._attributes["db_control_status"] = control_status
+                # 由于切换有延时，db_running_status可能还未更新，所以需要异步处理
+                import asyncio
+                async def update_control_status_after_delay():
+                    # 等待一段时间让db_running_status更新
+                    await asyncio.sleep(1)
+                    running_status = self._attributes.get("db_running_status")
+                    if running_status is not None:
+                        # 根据运行状态确定控制状态
+                        control_status = self._determine_control_status_based_on_running(running_status)
+                        # 更新本地属性
+                        self._attributes["db_control_status"] = control_status
+                        
+                        # 通知更新
+                        if hasattr(self, '_updates') and len(self._updates) > 0:
+                            update_status = {"db_control_status": control_status}
+                            self._update_all(update_status)
+                
+                # 启动异步任务更新控制状态
+                asyncio.create_task(update_control_status_after_delay())
         # 对于非T0xD9设备，保留原始逻辑
         else:
             # 如果设置了db_control_status，需要同步到本地属性和new_status
