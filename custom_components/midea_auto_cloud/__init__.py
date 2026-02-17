@@ -2,6 +2,7 @@ import asyncio
 import os
 import base64
 import traceback
+from datetime import timedelta
 from importlib import import_module
 import re
 from homeassistant.config_entries import ConfigEntry
@@ -45,9 +46,9 @@ from .const import (
     CONF_SN,
     CONF_MODEL_NUMBER,
     CONF_SERVERS, STORAGE_PATH, CONF_MANUFACTURER_CODE,
-    CONF_SELECTED_HOMES, CONF_SMART_PRODUCT_ID, STORAGE_PLUGIN_PATH
+    CONF_SELECTED_HOMES, CONF_SMART_PRODUCT_ID, STORAGE_PLUGIN_PATH,
+    CONF_HOME_ID, CONF_HOME_NAME, CONF_ACCOUNT_ID
 )
-# 账号型：登录云端、获取设备列表，并为每台设备建立协调器（无本地控制）
 from .const import CONF_PASSWORD as CONF_PASSWORD_KEY, CONF_SERVER as CONF_SERVER_KEY
 
 PLATFORMS: list[Platform] = [
@@ -65,8 +66,10 @@ PLATFORMS: list[Platform] = [
     Platform.VACUUM
 ]
 
+_LOGIN_LOCKS: dict[str, asyncio.Lock] = {}
+_CLOUD_CACHE: dict[str, tuple] = {}
+
 async def import_module_async(module_name):
-    # 在线程池中执行导入操作
     return await asyncio.to_thread(import_module, module_name, __package__)
 
 def get_sn8_used(hass: HomeAssistant, sn8):
@@ -95,22 +98,10 @@ async def load_device_config(hass: HomeAssistant, device_type, sn8):
     config_file = hass.config.path(f"{CONFIG_PATH}/{sn8}.json")
     raw = await hass.async_add_executor_job(_ensure_dir_and_load, config_dir, config_file)
     json_data = {}
-    # if isinstance(raw, dict) and len(raw) > 0:
-    #     # 兼容两种文件结构：
-    #     # 1) { "<sn8>": { ...mapping... } }
-    #     # 2) { ...mapping... }（直接就是映射体）
-    #     if sn8 in raw:
-    #         json_data = raw.get(sn8) or {}
-    #     else:
-    #         # 如果像映射体（包含 entities/centralized 等关键字段），直接使用
-    #         if any(k in raw for k in ["entities", "centralized", "queries", "manufacturer"]):
-    #             json_data = raw
-    # if not json_data:
     device_path = f".device_mapping.{'T0x%02X' % device_type}"
     try:
         mapping_module = await import_module_async(device_path)
         for key, config in mapping_module.DEVICE_MAPPING.items():
-            # support tuple & regular expression pattern to support multiple sn8 sharing one mapping
             if (key == sn8) or (isinstance(key, tuple) and sn8 in key) or (isinstance(key, str) and re.match(key, sn8)):
                 json_data = config
                 break
@@ -123,7 +114,6 @@ async def load_device_config(hass: HomeAssistant, device_type, sn8):
         MideaLogger.warning(f"Can't load mapping file for type {'T0x%02X' % device_type}")
 
     save_data = {sn8: json_data}
-    # offload save_json as well
     await hass.async_add_executor_job(save_json, config_file, save_data)
     return json_data
 
@@ -152,7 +142,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
     cjson = os.path.join(lua_path, "cjson.lua")
     bit = os.path.join(lua_path, "bit.lua")
 
-    # 只有文件不存在时才创建
     if not os.path.exists(cjson):
         from .const import CJSON_LUA
         cjson_lua = base64.b64decode(CJSON_LUA.encode("utf-8")).decode("utf-8")
@@ -161,7 +150,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
                 fp.write(cjson_lua)
         except PermissionError as e:
             MideaLogger.error(f"Failed to create cjson.lua at {cjson}: {e}")
-            # 如果无法创建文件，尝试使用临时目录
             import tempfile
             temp_dir = tempfile.gettempdir()
             cjson = os.path.join(temp_dir, "cjson.lua")
@@ -177,7 +165,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
                 fp.write(bit_lua)
         except PermissionError as e:
             MideaLogger.error(f"Failed to create bit.lua at {bit}: {e}")
-            # 如果无法创建文件，尝试使用临时目录
             import tempfile
             temp_dir = tempfile.gettempdir()
             bit = os.path.join(temp_dir, "bit.lua")
@@ -187,13 +174,32 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
 
     return True
 
-async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
-    device_type = config_entry.data.get(CONF_TYPE)
-    MideaLogger.debug(f"async_setup_entry type={device_type} data={config_entry.data}")
-    if device_type == CONF_ACCOUNT:
-        account = config_entry.data.get(CONF_ACCOUNT)
-        password = config_entry.data.get(CONF_PASSWORD_KEY)
-        server = config_entry.data.get(CONF_SERVER_KEY)
+async def _get_or_login_cloud(
+    hass: HomeAssistant,
+    account: str,
+    password: str,
+    server: int,
+    account_id: str
+):
+    global _LOGIN_LOCKS, _CLOUD_CACHE
+    
+    if account_id not in _LOGIN_LOCKS:
+        _LOGIN_LOCKS[account_id] = asyncio.Lock()
+    
+    login_lock = _LOGIN_LOCKS[account_id]
+    
+    async with login_lock:
+        if account_id in _CLOUD_CACHE:
+            cached_cloud, cached_homes = _CLOUD_CACHE[account_id]
+            try:
+                homes = await cached_cloud.list_home()
+                if homes:
+                    MideaLogger.debug(f"Using cached cloud session for account {account}")
+                    return cached_cloud, homes
+            except Exception as e:
+                MideaLogger.warning(f"Cached cloud session invalid, re-login: {e}")
+                del _CLOUD_CACHE[account_id]
+        
         cloud_name = CONF_SERVERS.get(server)
         cloud = get_midea_cloud(
             cloud_name=cloud_name,
@@ -201,213 +207,224 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
             account=account,
             password=password,
         )
+        
         if not cloud or not await cloud.login():
             MideaLogger.error("Midea cloud login failed")
-            return False
-
-        # 拉取家庭与设备列表
+            return None, None
+        
         try:
             homes = await cloud.list_home()
-            if homes and len(homes) > 0:
-                hass.data.setdefault(DOMAIN, {})
-                hass.data[DOMAIN].setdefault("accounts", {})
-                bucket = {"device_list": {}, "coordinator_map": {}}
-                
-                # 获取用户选择的家庭ID列表
-                selected_homes = config_entry.data.get(CONF_SELECTED_HOMES, [])
-                MideaLogger.debug(f"Selected homes from config: {selected_homes}")
-                MideaLogger.debug(f"Available homes keys: {list(homes.keys())}")
-                if not selected_homes:
-                    # 如果没有选择，默认使用所有家庭
-                    home_ids = list(homes.keys())
-                else:
-                    # 只处理用户选择的家庭，确保类型匹配
-                    home_ids = []
-                    for selected_home in selected_homes:
-                        # 尝试匹配字符串和数字类型的home_id
-                        if selected_home in homes:
-                            home_ids.append(selected_home)
-                        elif str(selected_home) in homes:
-                            home_ids.append(str(selected_home))
-                        elif int(selected_home) in homes:
-                            home_ids.append(int(selected_home))
-                MideaLogger.debug(f"Final home_ids to process: {home_ids}")
-
-                for home_id in home_ids:
-                    appliances = await cloud.list_appliances(home_id)
-                    if appliances is None:
-                        continue
-
-                    # 为每台设备构建占位设备与协调器（不连接本地）
-                    for appliance_code, info in appliances.items():
-                        MideaLogger.debug(f"info={info} ")
-
-                        os.makedirs(hass.config.path(STORAGE_PATH), exist_ok=True)
-                        path = hass.config.path(STORAGE_PATH)
-                        file = await cloud.download_lua(
-                            path=path,
-                            device_type=info.get(CONF_TYPE),
-                            sn=info.get(CONF_SN),
-                            model_number=info.get(CONF_MODEL_NUMBER),
-                            manufacturer_code=info.get(CONF_MANUFACTURER_CODE),
-                        )
-                        try:
-                            os.makedirs(hass.config.path(STORAGE_PLUGIN_PATH), exist_ok=True)
-                            plugin_path = hass.config.path(STORAGE_PLUGIN_PATH)
-                            await cloud.download_plugin(
-                                path=plugin_path,
-                                appliance_code=appliance_code,
-                                smart_product_id=info.get(CONF_SMART_PRODUCT_ID),
-                                device_type=info.get(CONF_TYPE),
-                                sn=info.get(CONF_SN),
-                                sn8=info.get(CONF_SN8),
-                                model_number=info.get(CONF_MODEL_NUMBER),
-                                manufacturer_code=info.get(CONF_MANUFACTURER_CODE),
-                            )
-                        except Exception as e:
-                            traceback.print_exc()
-
-                        try:
-                            device = MiedaDevice(
-                                name=info.get(CONF_NAME),
-                                device_id=appliance_code,
-                                device_type=info.get(CONF_TYPE),
-                                ip_address=None,
-                                port=None,
-                                token=None,
-                                key=None,
-                                connected=info.get("online"),
-                                protocol=info.get(CONF_PROTOCOL) or 2,
-                                model=info.get(CONF_MODEL),
-                                subtype=info.get(CONF_MODEL_NUMBER),
-                                manufacturer_code=info.get(CONF_MANUFACTURER_CODE),
-                                sn=info.get(CONF_SN),
-                                sn8=info.get(CONF_SN8),
-                                lua_file=file,
-                                cloud=cloud,
-                            )
-                            # 加载并应用设备映射（queries/centralized/calculate），并预置 attributes 键
-                            try:
-                                mapping = await load_device_config(
-                                    hass,
-                                    info.get(CONF_TYPE) or info.get("type"),
-                                    info.get(CONF_SN8) or info.get("sn8"),
-                                ) or {}
-                            except Exception:
-                                mapping = {}
-
-                            try:
-                                device.set_queries(mapping.get("queries", [{}]))
-                            except Exception:
-                                pass
-                            try:
-                                device.set_centralized(mapping.get("centralized", []))
-                            except Exception:
-                                pass
-                            try:
-                                device.set_calculate(mapping.get("calculate", {}))
-                            except Exception:
-                                pass
-
-                            # 提取并设置默认值
-                            try:
-                                default_values = {}
-                                entities_cfg = (mapping.get("entities") or {})
-                                for platform_cfg in entities_cfg.values():
-                                    if not isinstance(platform_cfg, dict):
-                                        continue
-                                    for entity_key, ecfg in platform_cfg.items():
-                                        if not isinstance(ecfg, dict):
-                                            continue
-                                        # 检查是否有 default_value 字段
-                                        if "default_value" in ecfg:
-                                            # 使用 entity_key 作为属性名，或者使用 attribute 字段
-                                            attr_name = ecfg.get("attribute", entity_key)
-                                            default_values[attr_name] = ecfg["default_value"]
-                                device.set_default_values(default_values)
-                            except Exception:
-                                traceback.print_exc()
-
-                            # 预置 attributes：包含 centralized 里声明的所有键、entities 中使用到的所有属性键
-                            try:
-                                preset_keys = set(mapping.get("centralized", []))
-                                entities_cfg = (mapping.get("entities") or {})
-                                # 收集实体配置中直接引用的属性键
-                                for platform_cfg in entities_cfg.values():
-                                    if not isinstance(platform_cfg, dict):
-                                        continue
-                                    for _, ecfg in platform_cfg.items():
-                                        if not isinstance(ecfg, dict):
-                                            continue
-                                        # 常见直接属性字段
-                                        for k in [
-                                            "power",
-                                            "aux_heat",
-                                            "current_temperature",
-                                            "target_temperature",
-                                            "oscillate",
-                                            "min_temp",
-                                            "max_temp",
-                                        ]:
-                                            v = ecfg.get(k)
-                                            if isinstance(v, str):
-                                                preset_keys.add(v)
-                                            elif isinstance(v, list):
-                                                for vv in v:
-                                                    if isinstance(vv, str):
-                                                        preset_keys.add(vv)
-                                        # 模式映射里的条件字段
-                                        for map_key in [
-                                            "hvac_modes",
-                                            "preset_modes",
-                                            "swing_modes",
-                                            "fan_modes",
-                                            "operation_list",
-                                            "options",
-                                        ]:
-                                            maps = ecfg.get(map_key) or {}
-                                            if isinstance(maps, dict):
-                                                for _, cond in maps.items():
-                                                    if isinstance(cond, dict):
-                                                        for attr_name in cond.keys():
-                                                            preset_keys.add(attr_name)
-                                # 传感器/开关等实体 key 本身也加入（其 key 即属性名）
-                                for platform_name, platform_cfg in entities_cfg.items():
-                                    if not isinstance(platform_cfg, dict):
-                                        continue
-                                    platform_str = str(platform_name)
-                                    if platform_str in [
-                                        str(Platform.SENSOR),
-                                        str(Platform.BINARY_SENSOR),
-                                        str(Platform.SWITCH),
-                                        str(Platform.FAN),
-                                        str(Platform.SELECT),
-                                        str(Platform.VACUUM),
-                                    ]:
-                                        for entity_key in platform_cfg.keys():
-                                            preset_keys.add(entity_key)
-                                # 写入默认空值
-                                for k in preset_keys:
-                                    if k not in device.attributes:
-                                        device.attributes[k] = None
-                                # 针对T0xD9复式洗衣机，设置默认的筒选择为左筒
-                                if device.device_type == 0xD9:
-                                    device.attributes["db_location_selection"] = "left"
-                            except Exception:
-                                pass
-
-                            coordinator = MideaDataUpdateCoordinator(hass, config_entry, device, cloud=cloud)
-                            # 后台刷新，避免初始化阻塞
-                            hass.async_create_task(coordinator.async_config_entry_first_refresh())
-                            bucket["device_list"][appliance_code] = info
-                            bucket["coordinator_map"][appliance_code] = coordinator
-                        except Exception as e:
-                            MideaLogger.error(f"Init device failed: {appliance_code}, error: {e}")
-                    # break
-                hass.data[DOMAIN]["accounts"][config_entry.entry_id] = bucket
-
+            if homes:
+                _CLOUD_CACHE[account_id] = (cloud, homes)
+                MideaLogger.debug(f"Cached cloud session for account {account}")
+                return cloud, homes
         except Exception as e:
-            MideaLogger.error(f"Fetch appliances failed: {e}")
+            MideaLogger.error(f"Failed to list homes: {e}")
+            return None, None
+        
+        return None, None
+
+async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
+    device_type = config_entry.data.get(CONF_TYPE)
+    MideaLogger.debug(f"async_setup_entry type={device_type} data={config_entry.data}")
+    
+    if device_type == CONF_ACCOUNT:
+        account = config_entry.data.get(CONF_ACCOUNT)
+        password = config_entry.data.get(CONF_PASSWORD_KEY)
+        server = config_entry.data.get(CONF_SERVER_KEY)
+        account_id = config_entry.data.get(CONF_ACCOUNT_ID, f"{account}_{server}")
+        home_id = config_entry.data.get(CONF_HOME_ID)
+        home_name = config_entry.data.get(CONF_HOME_NAME, f"家庭 {home_id}")
+        
+        cloud, homes = await _get_or_login_cloud(hass, account, password, server, account_id)
+        
+        if not cloud or not homes:
+            MideaLogger.error(f"Failed to get cloud session for account {account}")
+            return False
+        
+        if home_id is None:
+            selected_homes = config_entry.data.get(CONF_SELECTED_HOMES, [])
+            if selected_homes:
+                home_ids = []
+                for selected_home in selected_homes:
+                    if selected_home in homes:
+                        home_ids.append(selected_home)
+                    elif str(selected_home) in homes:
+                        home_ids.append(str(selected_home))
+                    elif int(selected_home) in homes:
+                        home_ids.append(int(selected_home))
+            else:
+                home_ids = list(homes.keys())
+        else:
+            home_ids = [home_id]
+        
+        MideaLogger.debug(f"Processing home_ids: {home_ids}")
+        
+        hass.data.setdefault(DOMAIN, {})
+        hass.data[DOMAIN].setdefault("accounts", {})
+        
+        bucket = {"device_list": {}, "coordinator_map": {}}
+        
+        for current_home_id in home_ids:
+            appliances = await cloud.list_appliances(current_home_id)
+            if appliances is None:
+                continue
+
+            for appliance_code, info in appliances.items():
+                MideaLogger.debug(f"info={info} ")
+
+                os.makedirs(hass.config.path(STORAGE_PATH), exist_ok=True)
+                path = hass.config.path(STORAGE_PATH)
+                file = await cloud.download_lua(
+                    path=path,
+                    device_type=info.get(CONF_TYPE),
+                    sn=info.get(CONF_SN),
+                    model_number=info.get(CONF_MODEL_NUMBER),
+                    manufacturer_code=info.get(CONF_MANUFACTURER_CODE),
+                )
+                try:
+                    os.makedirs(hass.config.path(STORAGE_PLUGIN_PATH), exist_ok=True)
+                    plugin_path = hass.config.path(STORAGE_PLUGIN_PATH)
+                    await cloud.download_plugin(
+                        path=plugin_path,
+                        appliance_code=appliance_code,
+                        smart_product_id=info.get(CONF_SMART_PRODUCT_ID),
+                        device_type=info.get(CONF_TYPE),
+                        sn=info.get(CONF_SN),
+                        sn8=info.get(CONF_SN8),
+                        model_number=info.get(CONF_MODEL_NUMBER),
+                        manufacturer_code=info.get(CONF_MANUFACTURER_CODE),
+                    )
+                except Exception as e:
+                    traceback.print_exc()
+
+                try:
+                    device = MiedaDevice(
+                        name=info.get(CONF_NAME),
+                        device_id=appliance_code,
+                        device_type=info.get(CONF_TYPE),
+                        ip_address=None,
+                        port=None,
+                        token=None,
+                        key=None,
+                        connected=info.get("online"),
+                        protocol=info.get(CONF_PROTOCOL) or 2,
+                        model=info.get(CONF_MODEL),
+                        subtype=info.get(CONF_MODEL_NUMBER),
+                        manufacturer_code=info.get(CONF_MANUFACTURER_CODE),
+                        sn=info.get(CONF_SN),
+                        sn8=info.get(CONF_SN8),
+                        lua_file=file,
+                        cloud=cloud,
+                    )
+                    try:
+                        mapping = await load_device_config(
+                            hass,
+                            info.get(CONF_TYPE) or info.get("type"),
+                            info.get(CONF_SN8) or info.get("sn8"),
+                        ) or {}
+                    except Exception:
+                        mapping = {}
+
+                    try:
+                        device.set_queries(mapping.get("queries", [{}]))
+                    except Exception:
+                        pass
+                    try:
+                        device.set_centralized(mapping.get("centralized", []))
+                    except Exception:
+                        pass
+                    try:
+                        device.set_calculate(mapping.get("calculate", {}))
+                    except Exception:
+                        pass
+
+                    try:
+                        default_values = {}
+                        entities_cfg = (mapping.get("entities") or {})
+                        for platform_cfg in entities_cfg.values():
+                            if not isinstance(platform_cfg, dict):
+                                continue
+                            for entity_key, ecfg in platform_cfg.items():
+                                if not isinstance(ecfg, dict):
+                                    continue
+                                if "default_value" in ecfg:
+                                    attr_name = ecfg.get("attribute", entity_key)
+                                    default_values[attr_name] = ecfg["default_value"]
+                        device.set_default_values(default_values)
+                    except Exception:
+                        traceback.print_exc()
+
+                    try:
+                        preset_keys = set(mapping.get("centralized", []))
+                        entities_cfg = (mapping.get("entities") or {})
+                        for platform_cfg in entities_cfg.values():
+                            if not isinstance(platform_cfg, dict):
+                                continue
+                            for _, ecfg in platform_cfg.items():
+                                if not isinstance(ecfg, dict):
+                                    continue
+                                for k in [
+                                    "power",
+                                    "aux_heat",
+                                    "current_temperature",
+                                    "target_temperature",
+                                    "oscillate",
+                                    "min_temp",
+                                    "max_temp",
+                                ]:
+                                    v = ecfg.get(k)
+                                    if isinstance(v, str):
+                                        preset_keys.add(v)
+                                    elif isinstance(v, list):
+                                        for vv in v:
+                                            if isinstance(vv, str):
+                                                preset_keys.add(vv)
+                                for map_key in [
+                                    "hvac_modes",
+                                    "preset_modes",
+                                    "swing_modes",
+                                    "fan_modes",
+                                    "operation_list",
+                                    "options",
+                                ]:
+                                    maps = ecfg.get(map_key) or {}
+                                    if isinstance(maps, dict):
+                                        for _, cond in maps.items():
+                                            if isinstance(cond, dict):
+                                                for attr_name in cond.keys():
+                                                    preset_keys.add(attr_name)
+                        for platform_name, platform_cfg in entities_cfg.items():
+                            if not isinstance(platform_cfg, dict):
+                                continue
+                            platform_str = str(platform_name)
+                            if platform_str in [
+                                str(Platform.SENSOR),
+                                str(Platform.BINARY_SENSOR),
+                                str(Platform.SWITCH),
+                                str(Platform.FAN),
+                                str(Platform.SELECT),
+                                str(Platform.VACUUM),
+                            ]:
+                                for entity_key in platform_cfg.keys():
+                                    preset_keys.add(entity_key)
+                        for k in preset_keys:
+                            if k not in device.attributes:
+                                device.attributes[k] = None
+                        if device.device_type == 0xD9:
+                            device.attributes["db_location_selection"] = "left"
+                    except Exception:
+                        pass
+
+                    coordinator = MideaDataUpdateCoordinator(hass, config_entry, device, cloud=cloud)
+                    hass.async_create_task(coordinator.async_config_entry_first_refresh())
+                    bucket["device_list"][appliance_code] = info
+                    bucket["coordinator_map"][appliance_code] = coordinator
+                except Exception as e:
+                    MideaLogger.error(f"Init device failed: {appliance_code}, error: {e}")
+        
+        hass.data[DOMAIN]["accounts"][config_entry.entry_id] = bucket
+
         await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
         return True
 
@@ -416,7 +433,6 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     device_id = config_entry.data.get(CONF_DEVICE_ID)
     device_type = config_entry.data.get(CONF_TYPE)
     if device_type == CONF_ACCOUNT:
-        # 卸载平台并清理账号桶
         unload_ok = await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS)
         if unload_ok:
             try:
@@ -429,7 +445,6 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry):
         if device is not None:
             if get_sn8_used(hass, device.sn8) == 1:
                 remove_device_config(hass, device.sn8)
-            # device.close()
         hass.data[DOMAIN][DEVICES].pop(device_id)
     for platform in PLATFORMS:
         await hass.config_entries.async_forward_entry_unload(config_entry, platform)

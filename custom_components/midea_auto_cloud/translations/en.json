@@ -47,8 +47,15 @@
         "data": {
           "selected_homes": "Select Homes"
         }
+      },
+      "confirm": {
+        "title": "Confirm Configuration",
+        "description": "{homes_list}"
       }
     }
+  },
+  "abort": {
+    "entries_created": "Configuration entries have been successfully created"
   },
   "options": {
     "step": {

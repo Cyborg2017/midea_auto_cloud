@@ -47,8 +47,15 @@
         "data": {
           "selected_homes": "选择家庭"
         }
+      },
+      "confirm": {
+        "title": "确认配置",
+        "description": "{homes_list}"
       }
     }
+  },
+  "abort": {
+    "entries_created": "配置条目已成功创建"
   },
   "options": {
     "step": {

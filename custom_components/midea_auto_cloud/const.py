@@ -23,3 +23,6 @@ CONF_SERVERS = {
 }
 CONF_HOMES = "homes"
 CONF_SELECTED_HOMES = "selected_homes"
+CONF_HOME_ID = "home_id"
+CONF_HOME_NAME = "home_name"
+CONF_ACCOUNT_ID = "account_id"
