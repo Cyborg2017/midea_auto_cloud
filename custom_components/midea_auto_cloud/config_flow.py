@@ -30,6 +30,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     _homes = None
     _user_input = None
     _home_device_counts = None
+    _home_online_counts = None
     _selected_homes = None
     _account_id = None
 
@@ -62,10 +63,17 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         self._homes = homes
                         
                         self._home_device_counts = {}
+                        self._home_online_counts = {}
                         for home_id, home_info in homes.items():
                             appliances = await cloud.list_appliances(home_id)
                             device_count = len(appliances) if appliances else 0
+                            online_count = 0
+                            if appliances:
+                                for appliance_info in appliances.values():
+                                    if isinstance(appliance_info, dict) and appliance_info.get("online"):
+                                        online_count += 1
                             self._home_device_counts[home_id] = device_count
+                            self._home_online_counts[home_id] = online_count
                         
                         return await self.async_step_select_homes()
                     else:
@@ -173,7 +181,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 home_name = str(home_info) if home_info else f"家庭 {home_id}"
             
-            entry_title = f"{account} - {home_name}"
+            device_count = self._home_device_counts.get(home_id, 0)
+            online_count = self._home_online_counts.get(home_id, 0)
+            entry_title = f"{account} | {home_name} ({device_count}台设备, {online_count}台在线)"
             unique_id = f"{account_id}_{home_id}"
             
             entries_to_create.append({
