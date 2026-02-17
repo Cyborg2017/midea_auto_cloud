@@ -16,7 +16,9 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.core import (
     HomeAssistant,
+    callback,
 )
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.const import (
     Platform,
     CONF_TYPE,
@@ -424,6 +426,31 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                     MideaLogger.error(f"Init device failed: {appliance_code}, error: {e}")
         
         hass.data[DOMAIN]["accounts"][config_entry.entry_id] = bucket
+
+        async def async_update_entry_title(now):
+            if config_entry.entry_id not in hass.data.get(DOMAIN, {}).get("accounts", {}):
+                return
+            
+            try:
+                appliances = await cloud.list_appliances(home_id)
+                if appliances:
+                    device_count = len(appliances)
+                    online_count = sum(1 for info in appliances.values() if isinstance(info, dict) and info.get("online"))
+                    
+                    current_home_info = homes.get(home_id, {})
+                    if isinstance(current_home_info, dict):
+                        current_home_name = current_home_info.get("name", home_name)
+                    else:
+                        current_home_name = str(current_home_info) if current_home_info else home_name
+                    
+                    new_title = f"{account} | {current_home_name} ({device_count}台设备, {online_count}台在线)"
+                    if config_entry.title != new_title:
+                        hass.config_entries.async_update_entry(config_entry, title=new_title)
+                        MideaLogger.debug(f"Updated entry title: {new_title}")
+            except Exception as e:
+                MideaLogger.debug(f"Error updating entry title: {e}")
+        
+        async_track_time_interval(hass, async_update_entry_title, timedelta(minutes=5))
 
         await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
         return True
