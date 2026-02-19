@@ -2371,6 +2371,9 @@
       }
     },
   "switch": {
+    "efficient": {
+        "name": "Low Power Insulation"
+      },
 	  "prevent_super_cool": {
         "name": "Prevent Super Cool"
       },
